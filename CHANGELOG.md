@@ -12,6 +12,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_entra_sign_in_logs`** (`EVD-AZURE-ENTRA-SIGN-IN-LOGS`): Entra ID
+  authentication evidence read from a Log Analytics (Sentinel) workspace's
+  `SigninLogs` and `AuditLogs` through the Log Analytics query API, with no
+  Microsoft Graph permission, so a person with an Azure role can collect it. Over a
+  lookback (default 30 days): interactive sign-ins succeeded and failed, the share
+  of successful sign-ins that required MFA and that used a phishing-resistant
+  method (FIDO2, Windows Hello for Business, certificates, passkeys), what enforced
+  the requirement (Conditional Access, security defaults, per-user MFA), the
+  Conditional Access status and risky sign-ins let through, per-user counts, the
+  successful single-factor sign-ins (Windows device logons and passkey-only
+  sign-ins counted apart, the same rules as `azure_entra_sign_ins`), and the
+  changes to the authentication methods, MFA, security defaults and Conditional
+  Access policies plus every other Policy-category change, counted without a cap.
+  Optional user and app id lists scope the sign-ins to one boundary. It shows how
+  sign-in is enforced, not the policy configuration, which only Microsoft Graph
+  exposes.
 - **`azure_defender_assessments` 0.4.0: days open and past-SLA counts.** Each
   Unhealthy assessment reports `days_open` (from `status_change_date`, null when
   missing; it starts again at 0 when a finding turns Healthy and then Unhealthy

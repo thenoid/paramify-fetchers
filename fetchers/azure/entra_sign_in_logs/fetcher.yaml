@@ -1,0 +1,140 @@
+name: azure_entra_sign_in_logs
+version: 0.1.0
+description: >-
+  Shows from the workspace's Entra sign-in logs whether successful sign-ins required MFA and phishing-resistant methods, and the changes made to the authentication and Conditional Access policies.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_sign_in_logs.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id holding the Log Analytics workspace that receives Entra
+      ID logs (often a hub or security subscription). Optional — omit to use the
+      first enabled subscription the ambient credential can see.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to read. Optional — omit to
+      read every Log Analytics workspace in the subscription; a workspace without
+      the SigninLogs table is reported as not holding Entra logs. Name the one
+      workspace Entra exports to when it exports to several, or the summary sums
+      the same sign-ins once per workspace.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: ENTRA_LOG_LOOKBACK_DAYS
+    description: How many days of SigninLogs and AuditLogs to summarize.
+  users:
+    type: string
+    required: false
+    env: ENTRA_LOG_USERS
+    description: >
+      Comma-separated user principal names to limit the sign-in evidence to, such
+      as the administrators of one authorization boundary. Optional — omit for
+      every user in the tenant. With app_ids also set, a sign-in must match both.
+      The policy change evidence is never scoped. A value that is not a user
+      principal name fails the run as bad_config.
+  app_ids:
+    type: string
+    required: false
+    env: ENTRA_LOG_APP_IDS
+    description: >
+      Comma-separated application (client) ids to limit the sign-in evidence to,
+      such as a system's portals. Optional — omit for every app. A value that is
+      not a GUID fails the run as bad_config.
+  max_rows:
+    type: integer
+    required: false
+    default: 500
+    env: ENTRA_LOG_MAX_ROWS
+    description: >
+      The most users, single-factor sign-ins and policy change events listed per
+      workspace; a longer list is cut and marked truncated. Counts come from
+      separate queries and are never cut.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-APM   # successful sign-ins that required MFA and used phishing-resistant methods
+  - KSI-SVC-SIN   # sign-in through cryptographic authenticators (FIDO2, certificates, passkeys)
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-SIGN-IN-LOGS
+  name: Azure Entra Sign-in Logs
+  instructions: |
+    Script: azure/entra_sign_in_logs/fetcher.py
+
+    Access: Reader on the subscription, which includes querying its workspaces' logs; or, to read only these two tables, a role with Microsoft.OperationalInsights/workspaces/read on the workspace and workspaces/query/read granted on its SigninLogs and AuditLogs tables. No Microsoft Graph permission is used. Without query access the run fails as not_authorized.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces and GET Microsoft.SecurityInsights/onboardingStates (per workspace) — the workspaces and whether Sentinel is on each
+    - GET workspaces/{workspace}/tables/SigninLogs and tables/AuditLogs (per workspace) — whether Entra exports each table there, and its retention
+    - Log Analytics query on SigninLogs within the lookback (per workspace, six queries) — interactive sign-ins with their result, authentication requirement, succeeded methods, requirement sources, Conditional Access status and risk, summarized and per user
+    - Log Analytics query on AuditLogs within the lookback (per workspace, two queries) — changes to the authentication methods, MFA, security defaults and Conditional Access policies, and every other Policy-category change
+
+    Output: azure_entra_sign_in_logs_<subscription>.json — per workspace, the sign-in summary and breakdowns, each user's counts, the successful single-factor sign-ins, and the policy change events.
+
+    Summary fields:
+
+    What was read?
+    - workspaces_collected — Number of Log Analytics workspaces read in the subscription
+    - lookback_days — How many days of logs were summarized (lookback_days setting, default 30)
+    - scope_users — List of the user principal names the sign-in evidence is limited to; empty means every user
+    - scope_app_ids — List of the application ids the sign-in evidence is limited to; empty means every app
+    - workspaces_with_sign_in_logs — Number of workspaces holding the SigninLogs table; the sign-in counts below are summed across them, so name one with the workspaces target field when Entra exports to several
+    - sign_in_logs_workspaces — List of the names of those workspaces
+    - sign_in_logs_read — True if every such workspace's sign-in queries succeeded; false if there is none, a query failed, or a workspace's table lookup failed, and then every sign-in field below is null
+    - latest_sign_in — Time of the newest sign-in in the logs, which shows whether Entra logs are still arriving
+
+    Did successful sign-ins require MFA?
+    - sign_ins — Number of interactive sign-ins in the lookback; non-interactive and service principal sign-ins are not counted
+    - sign_ins_succeeded — Number of sign-ins with ResultType 0
+    - sign_ins_failed — Number of sign-ins with any other ResultType
+    - succeeded_multi_factor — Number of successful sign-ins whose authentication requirement was multiFactorAuthentication
+    - succeeded_single_factor — Number of successful sign-ins whose authentication requirement was singleFactorAuthentication, not counting Windows device logons or sign-ins that used a phishing-resistant method on their own
+    - succeeded_single_factor_phishing_resistant — Number of successful sign-ins with no MFA requirement that used a phishing-resistant method on its own, such as a passkey, which is not a password alone
+    - succeeded_device_logons — Number of successful logons to Windows devices (the Windows Sign In app), counted apart from sign-ins to apps
+    - multi_factor_percentage — Percentage of successful sign-ins that required MFA: succeeded_multi_factor * 100 / sign_ins_succeeded, 0 when there are none
+    - all_successful_sign_ins_multi_factor — True if succeeded_single_factor is 0; false if it is above 0; null if the logs were not read or no sign-in succeeded
+    - users_signed_in — Number of users with at least one sign-in
+    - users_with_single_factor_success — Number of users with at least one successful single-factor sign-in
+    - succeeded_by_requirement_provider — Number of successful sign-ins for each source of the authentication requirement, as Entra names it (multiConditionalAccess, securityDefaults, perUserMfa, identityProtection and others); a sign-in with more than one source counts under each
+
+    Were phishing-resistant methods used?
+    - succeeded_phishing_resistant — Number of successful sign-ins in which a succeeded method was FIDO2, a passkey, Windows Hello for Business or a platform credential, or a certificate when MFA was required with no weaker or reused method beside it; "Previously satisfied" and "Satisfied by token" steps are not methods
+    - phishing_resistant_percentage — Percentage of successful sign-ins that used a phishing-resistant method: succeeded_phishing_resistant * 100 / sign_ins_succeeded, 0 when there are none
+    - succeeded_by_method — Number of successful sign-ins for each succeeded authentication method name, reused steps left out; a sign-in with more than one method counts under each
+
+    Did Conditional Access apply, and were risky sign-ins let through?
+    - succeeded_by_conditional_access_status — Number of successful sign-ins for each Conditional Access status (success, failure, notApplied)
+    - succeeded_risky — Number of successful sign-ins rated medium or high risk during sign-in; needs Entra ID P2, without which every sign-in reads hidden
+
+    Were the authentication policies changed?
+    - workspaces_with_audit_logs — Number of workspaces holding the AuditLogs table
+    - audit_logs_read — True if every such workspace's audit queries succeeded; false if there is none, a query failed, or a table lookup failed, and then the two fields below are null
+    - policy_changes — Number of changes in the lookback to the authentication methods, authentication strength, MFA service, per-user MFA, security defaults and Conditional Access policies, plus every other change Entra files under the Policy category, counted without a cap
+    - policy_changes_by_operation — Number of those changes for each operation name, so a change this fetcher does not list by name still shows

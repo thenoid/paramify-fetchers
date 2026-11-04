@@ -214,7 +214,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 # add a category (or category/short_name) once its fetchers are converted.
 # --------------------------------------------------------------------------- #
 
-TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users",
+TEXT_FORMAT_FETCHERS = ("azure/alert_rules", "azure/change_work_items", "azure/entra_risky_users", "azure/entra_sign_in_logs",
                         "azure/sentinel_playbooks", "oci")
 MAX_DESCRIPTION_WORDS = 30
 FIELD_LINE = re.compile(r"^- (\S+) — \S")
